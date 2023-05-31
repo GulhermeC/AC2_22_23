@@ -6,7 +6,6 @@ void putc(char byte);
 
 int main(void){
 
-    // port RC14 as output
     configUart(115200, 'N', 1);
     IPC8bits.U2IP = 2; // prioridade da interrupção (1 a 6)
 

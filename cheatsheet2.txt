@@ -1,0 +1,108 @@
+/7/-------------------------------------------------------------------------
+//Configure interrupt system
+IPC6bits.AD1IP = 4;
+IEC1bits.AD1IE = 1;
+IFS1bits.AD1IF = 0;
+EnableInterrupts();
+
+//void _int_(VECTOR) isr_adc(void) -> Vector = vector number in sheet
+// AD1 - ADC1 Convert Done -> vector = 27
+void _int_(27) isr_adc(void)
+{
+    //Reset AD1IF flag
+    IFS1bits.AD1IF = 0;
+}
+
+/8/-------------------------------------------------------------------------
+
+T3CONbits.TCKPS = 7;    // 1:256 prescaler (i.e. fin = 78 125 KHz)
+PR3 = 39062;            // Fout = 20MHz / (256 * (39061,5 + 1)) = 2 Hz
+TMR3 = 0;               // Clear timer T2 count register
+T3CONbits.TON = 1;      // Enable timer T2 -> must be the last command of the
+                        // timer configuration sequence
+while(1)
+{
+    while(IFS0bits.T3IF==0);
+    IFS0bits.T3IF=0;
+}
+
+/9/-------------------------------------------------------------------------
+
+T1CONbits.TCKPS = 5;    // 1:32 prescaler (i.e Fout_presc = 625 KHz)
+PR1 = 62499;            // Fout = 20MHz / (32 * (62499 + 1)) = 10 Hz
+TMR1 = 0;               // Reset timer T1 count register
+T1CONbits.TON = 1;      // Enable timer T1 (must be the last command of the
+                        // timer configuration sequence)
+OC1CONbits.OCM = 6;     // PWM mode on OCx; fault pin disabled
+OC1CONbits.OCTSEL =0;   // Use timer T1 as the time base for PWM generation
+
+IFS0bits.T1IF = 0;      //Reset timer T1 interrupt flag
+IPC1bits.T1IP = 3;      //Interrupt priority (must be in range[1..6])
+IEC0bits.T1IE = 1;      //Enable timer T1 interrupts
+
+EnableInterrupts();
+void _int_(4) isr_T1(void)
+{
+    IFS0bits.T1IF = 0;  
+}
+
+void _int_(27) isr_adc(void)
+{
+    //Reset AD1IF flag
+    IFS1bits.AD1IF = 0;
+}
+
+/10/-------------------------------------------------------------------------
+
+// Configure UART2:
+// 1 - Configure BaudRate Generator
+// BRGH High Baug Rate Enable bit (1 = High Speed | 0 = Standard Speed)
+U2MODEbits.BRGH = 0;
+U2BRG=10;
+
+// 2 - Configure number of data bits, parity and number of stop bits
+//     (see U2MODE register)
+//PDSEL Parity and Data Selection (0) = 8bit data no parity
+U2MODEbits.PDSEL = 0;
+//STSEL Stop Selection bit (1 = 2 Stop bits) | (0 = 1 Stop bit)
+U2MODEbits.STSEL = 0;
+
+// 3 - Enable the transmitter and receiver modules
+U2STAbits.UTXEN = 1;
+U2STAbits.URXEN = 1;
+
+// 4 - Enable UART2 (see register)
+U2MODEbits.ON=1;
+
+void putc(char byte){
+    while(U2STAbits.UTXBF == 1);
+    U2TXREG = byte;
+}
+
+char getc(void){
+    while(U2STAbits.URXDA == 0);
+    return U2RXREG;
+}
+
+/11/-------------------------------------------------------------------------
+
+configUart(115200, 'N', 1);
+IPC8bits.U2IP = 2; // prioridade da interrupção (1 a 6)
+
+U2STAbits.UTXISEL = 0; // Interrupts set when Output FIFO has space for next char
+U2STAbits.URXISEL = 0; // Interrupts set when Input FIFO has at least one char
+
+IEC1bits.U2TXIE = 0; // desativa pedidos de interrupção na transmissão
+IEC1bits.U2RXIE = 1; // ativa pedidos de interrupção na receção
+
+IFS1bits.U2RXIF = 0; // limpar pedido de interrupção do lado rx
+EnableInterrupts();
+
+void _int_(32) isr_UART2(){
+    char cc;
+    if(IFS1bits.U2RXIF == 1) {
+        cc = U2RXREG;
+        putc(cc);
+    }
+    IFS1bits.U2RXIF = 0; // limpar pedido de interrupção do lado rx
+}
