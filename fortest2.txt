@@ -1,0 +1,114 @@
+//DELAY
+void delay(int us){
+    resetCoreTimer();
+    while (readCoreTimer() < us * 20);
+}
+
+//TO BCD
+unsigned char toBcd(unsigned char value) {
+    return ((value / 10) << 4) + value % 10;
+}
+
+//SEND TO DISPLAYS
+void send2displays(unsigned char value) {
+    static const char display7Scodes[] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D,
+                                          0x7D, 0x07, 0x7F, 0x6F, 0x77, 0x7C,
+                                          0x39, 0x5E, 0x79, 0x71};
+    static unsigned char flag = 0;
+    unsigned char menosSig = value & 0x0F;
+    unsigned char maisSig = value >> 4;
+    if (flag == 0) {
+        LATDbits.LATD5 = 1;
+        LATDbits.LATD6 = 0;
+        LATB = (LATB & 0x80FF) | display7Scodes[menosSig] << 8;
+    } else {
+        LATDbits.LATD5 = 0;
+        LATDbits.LATD6 = 1;
+        LATB = (LATB & 0x80FF) | display7Scodes[maisSig] << 8;
+    }
+    flag = !flag;
+}
+
+
+//TIMER
+T2CONbits.TCKPS = 2;    // 1:4 prescaler
+PR2 = 33332;            // 150 Hz
+TMR2 = 0;               // Reset timer T2 count register
+T2CONbits.TON = 1;      // Enable timer (last command)
+
+//TIMER INTERRUPTS
+IPC2bits.T2IP = 2;      // Interrupt priority (must be in range [1..6])
+IEC0bits.T2IE = 1;      // Enable timer T2 interrupts
+IFS0bits.T2IF = 0;      // Reset timer T2 interrupt flag
+EnableInterrupts();
+
+//PWM/DUTY CYCLE
+OC2CONbits.OCM = 6;
+OC2CONbits.OCTSEL = 0;
+OC2RS = 8333;
+OC2CONbits.ON = 1;
+
+//TIMER INTERRUPT HANDLER 
+void _int_(8) isr_adc(void) {
+    IFS0bits.T2IF = 0; // Reset Timer T2 interrupt flag
+}
+
+//AD CONVERTER
+TRISBbits.TRISB = 1;        // RB4 digital output disconnected
+AD1PCFGbits.PCFG4 = 0;      // RB4 configured as analog input
+AD1CON1bits.SSRC = 7;       // Conversion trigger selection bits: in this
+AD1CON1bits.CLRASAM = 1;    // Stop conversions when the 1st A/D converter
+AD1CON3bits.SAMC = 16;      // Sample time is 16 TAD (TAD = 100 ns)
+AD1CON2bits.SMPI = 1;       // Interrupt is generated 2 samples
+AD1CHSbits.CH0SA = 4;       // replace 4 by the desired input
+AD1CON1bits.ON = 1          // Enable A/D converter
+int *p = (int *)(&ADC1BUF0); // READ CONVERTER
+
+//UART2
+U2BRG = 129;                // 9600 baudrate (20 000 000 + baudrate * 8) / (16 * baudrate) - 1 
+U2MODEbits.BRGH = 0;
+U2MODEbits.PDSEL = 2;       // odd
+U2MODEbits.STSEL = 1;       // 2 stop bits
+U2STAbits.URXEN = 1;
+U2STAbits.UTXEN = 1;
+U2MODEbits.ON = 1;
+
+//UART2 INTERRUPTS
+IPC8bits.U2IP = 2;          // Interrupt priority (must be in range [1..6])
+IEC1bits.U2TXIE = 0;        // Disable U2 transmiter interrupts
+IEC1bits.U2RXIE = 1;        // Enable U2 receiver interrupts
+IFS1bits.U2RXIF = 0;        // Reset U2 interrupt flag
+
+//UART2 CHARS
+void putc(char byte2send) {
+    while (U2STAbits.UTXBF == 1);
+    U2TXREG = byte2send;
+}
+
+void putStr(char* str) {
+    int i;
+    for (i = 0; str[i] != '\0'; i++){
+        putc(str[i]);
+    }
+}
+
+
+//UART2 INTERRUPT HANDLER
+void _int_(32) isr_receive_UART2(void) {
+    if (IFS1bits.U2RXIF == 1) {
+        char byte;
+        byte = U2RXREG;
+        if (byte == 'U') {
+            counter++;
+            if (counter == 16){
+                counter = 0;
+            }
+        }
+        if (byte == 'R') {
+            counter = 0;
+            putStr("RESET");
+        }
+        LATE = (LATE & 0xFFE1) | counter << 1;
+        IFS1bits.U2RXIF = 0;        // Reset Flag
+    }
+}
